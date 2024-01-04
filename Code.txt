@@ -1,0 +1,250 @@
+module RoughProject(inputClock, horizSegmentOnes, horizSegmentTens, vertSegmentOnes, vertSegmentTens, 
+						  horizontalLED, verticalLED, horizPedesButton, vertPedesButton, horizCarIncrButton, vertCarIncrButton);
+	input inputClock, horizPedesButton, vertPedesButton, horizCarIncrButton, vertCarIncrButton; // The 50 MHz clock input, the pedestrian traffic light buttons and the number of cars.
+	output [6:0] horizSegmentOnes, horizSegmentTens, vertSegmentOnes, vertSegmentTens; // The 7-segment time displays for the pedestrians to cross the street.
+	output [2:0] horizontalLED, verticalLED; // The traffic light LEDs. 0 = Red Light. 1 = Amber Light. 2 = Green Light.
+	
+	wire horizontalTurn, prepToStop; // The values to indicate the traffic direction with the right of way and orange light.
+	wire outputClock; // The converted 1 Hz clock from the 50 MHz clock input.
+	wire horizButtonReset, vertButtonReset; // The values to control whether the time should be given to pedestrians.
+	wire [7:0] D, onesNum, tensNum; // The time keepers.
+	reg [14:0] horizCurrent, vertCurrent; // The initialiaed values to control the time difference between the traffic lights.
+	reg horizStatus, vertStatus; // The values to control whether the time should be given to pedestrians.
+	
+	clockConverter M1(inputClock, outputClock); // Convert the 50 MHz clock input to 1 Hz clock.
+	
+	combinationLogic M2(outputClock, D, horizStatus, vertStatus, prepToStop, horizontalTurn, horizButtonReset, vertButtonReset, 25 + horizCurrent - vertCurrent, 25 - horizCurrent + vertCurrent); // Manage the timer for traffic light.
+	
+	configureLED M3(horizontalLED, verticalLED, horizontalTurn, prepToStop); // Assign LED values based on current state of the traffic light.
+	
+	digitConverter M4(D, onesNum, tensNum); // Convert binary to ones and tens digit.
+	
+	displaySegmentOnes M5(onesNum, horizSegmentOnes, horizontalTurn); // Display the ones digit segment timer for the pedestrian heading towards the horizontal direction.
+	displaySegmentTens M6(tensNum, horizSegmentTens, horizontalTurn); // Display the tens digit segment timer for the pedestrian heading towards the horizontal direction.
+	displaySegmentOnes M7(onesNum, vertSegmentOnes, !horizontalTurn); // Display the ones digit segment timer for the pedestrian heading towards the vertical direction.
+	displaySegmentTens M8(tensNum, vertSegmentTens, !horizontalTurn); // Display the tens digit segment timer for the pedestrian heading towards the vertical direction.
+	
+	always @(negedge horizPedesButton) begin // As long as the button is pressed at least once, it will set to the pedestrians timer.
+		horizStatus = !horizButtonReset; // When they are not equal, that is when the pedestrians will be given more time.
+	end
+	
+	always @(negedge vertPedesButton) begin // As long as the button is pressed at least once, it will set to the pedestrians timer.
+		vertStatus = !vertButtonReset; // When they are not equal, that is when the pedestrians will be given more time.
+	end
+	
+	always @(negedge horizCarIncrButton) begin // Adjust time due to the increase in amount of cars at the horizontal street or/and decrease in amount of cars at the vertical street.
+		if (horizCurrent < 45) begin // Allow at least five seconds to let the intersection with the lower cars to pass.
+			horizCurrent = horizCurrent + 1;
+		end
+	end
+	
+	always @(negedge vertCarIncrButton) begin // Adjust time due to the increase in amount of cars at the vertical street or/and decrease in amount of cars at the horizontal street.
+		if (vertCurrent < 45) begin // Allow at least five seconds to let the intersection with the lower cars to pass.
+			vertCurrent = vertCurrent + 1;
+		end
+	end
+	
+endmodule
+
+	
+module clockConverter(internal_clock_50MHz, clock_1Hz);
+	input internal_clock_50MHz; // It takes 50 Mhz internal clock and every 50 000 000 cycles it change our clock to high or low.
+	output reg clock_1Hz; // The slowed down clock.
+	reg [28:0] count; // Value to slow down clock.
+
+	always @(posedge internal_clock_50MHz) begin
+		
+		count = count + 1; // Increment positive edge counter on every positive edge iteration of the 50MHz inernal clock.
+
+		if (count >= 2500000) begin // If the positive edge counter >= 25 000 000 edges.
+			count = 0; // Then reset the 25 MHz positive edge counter to 0.
+			clock_1Hz = ~clock_1Hz; // And set the 1 Hz clock to be 1 (or 0, depends on previous state of 1Hz clock).
+		end
+			
+	end
+	
+endmodule
+
+
+module combinationLogic(outputClock, D, horizButtonInput, vertButtonInput, prepareToStop, horizontalTurn, horizButtonReset, vertButtonReset, horizCurrent, vertCurrent);
+	input outputClock, horizButtonInput, vertButtonInput; // The 1 MHz clock to control the time difference in changes within the logic and the buttons.
+	input [14:0] horizCurrent, vertCurrent; // The adjusted time to balance the cars between the intersections.
+	output reg horizButtonReset, vertButtonReset; // It will always be set to buttonInput to indicate that the button needs to be pressed again to activate pedestrian timer.
+	output reg [7:0] D = 25; // The current timer within the module for green light. Starting time can be whatever honestly.
+	output reg prepareToStop = 0, horizontalTurn = 1; // The initialized values to indicate the traffic direction with the right of way and orange light.
+	
+	reg count = 0; // The current timer within the module for amber light.
+	
+	always @(posedge outputClock) 
+		begin
+		
+		if (prepareToStop == 1) begin // The case when the light is currently amber.
+		
+			if (count == 0) begin // The case when the 3-second amber light is finally over.
+				prepareToStop = 0; // Reset amber light.
+				
+				if (!horizontalTurn) begin // When amber light turns off at the horizontal street.
+					if (horizButtonInput != horizButtonReset) begin // Case when the pedestrian button is enabled.
+						if (horizCurrent + 10 > 25) begin // Case when the horizCurrent + 10 has enough time (presumed is 25s) for a pedestrian to cross a street
+							D = horizCurrent + 10;
+							
+						end else begin
+							D = 25; // The minimum presumed time needed for pedestrians to be able to cross the street. 
+						end
+						
+						horizButtonReset = !horizButtonReset;
+						
+					end else begin
+						D = horizCurrent; // Reset direction timer. Default timer for a street with no pedestrians.
+					end
+					
+				end else begin // When amber light turns off at the vertical  street.
+					if (vertButtonInput != vertButtonReset) begin // Case when the pedestrian button is enabled.
+						if (vertCurrent + 10 > 25) begin // Case when the vertCurrent + 10 has enough time (presumed is 25s) for a pedestrian to cross a street
+							D = vertCurrent + 10;
+							
+						end else begin
+							D = 25; // The minimum presumed time needed for pedestrians to be able to cross the street. 
+						end
+
+						vertButtonReset = !vertButtonReset;
+						
+					end else begin
+						D = vertCurrent; // Reset direction timer. Default timer for a street with no pedestrians.
+					end
+
+				end
+				
+				horizontalTurn = !horizontalTurn;
+				
+			end else begin // The case when the 3-second amber light is still ongoing.
+				count = count - 1;
+				
+			end
+			
+		end else if (D == 0) begin // The case when the current timer for green light reaches 0.
+			count = 3;
+			prepareToStop = 1;
+			
+		end else begin // The case when the current timer for green light is still ongoing.
+			D = D - 1;
+			prepareToStop = 0;
+		end
+			
+	end
+	
+endmodule
+
+
+module configureLED(horizontalLED, verticalLED, horizontalTurn, prepToStop);
+	input horizontalTurn, prepToStop; // The values to indicate the condition of right of way and orange light.
+	output reg [2:0] horizontalLED, verticalLED; // The traffic light LEDs. 0 = Red Light. 1 = Amber Light. 2 = Green Light.
+	
+	always @(*) begin
+		
+		if (horizontalTurn == 1) begin // The case when the horizontal section has the right of way.
+			
+			verticalLED[0] = 1; 
+			verticalLED[1] = 0;
+			verticalLED[2] = 0;
+			horizontalLED[0] = 0;
+			
+			if (prepToStop == 0) begin // The case when the light is green.
+				horizontalLED[2] = 1;
+				horizontalLED[1] = 0;
+				
+			end else begin // The case when the light is amber.
+				horizontalLED[2] = 0;
+				horizontalLED[1] = 1;
+			end
+			
+		end else begin // The case when the vertical section has the right of way.
+			
+			horizontalLED[0] = 1;
+			horizontalLED[1] = 0;
+			horizontalLED[2] = 0;
+			verticalLED[0] = 0;
+			
+			if (prepToStop == 0) begin // The case when the light is green.
+				verticalLED[2] = 1;
+				verticalLED[1] = 0;
+				
+			end else begin  // The case when the light is amber.
+				verticalLED[2] = 0;
+				verticalLED[1] = 1;
+			end
+			
+		end
+	end
+			
+endmodule
+
+
+module digitConverter(Q, onesNum, tensNum);
+	input [7:0] Q; // The number to be used to convert the digits.
+	output[3:0] onesNum, tensNum; // The digits that are being converted.
+	
+	assign onesNum = Q % 10; // The ones digit conversion.
+	assign tensNum = Q / 10; // The tens digit conversion.
+
+endmodule
+
+
+module displaySegmentOnes(Q, display, turn); // Segment converter for ones only.
+	input turn; // The value to indicate whether it is the direction's turn.
+	input [3:0] Q; // The binary to be used to generate the segment values.
+	output reg [6:0] display; // The segment.
+	
+	always @(Q) begin
+		if (turn == 1) // When it is the direction's turn, set an actual segment value to it.
+			case(Q)
+		
+			0: display = 7'b1000000;
+			1: display = 7'b1111001;
+			2: display = 7'b0100100;
+			3: display = 7'b0110000;
+			4: display = 7'b0011001;
+			5: display = 7'b0010010;
+			6: display = 7'b0000010;
+			7: display = 7'b1111000;
+			8: display = 7'b0000000;
+			9: display = 7'b0011000;
+
+			endcase
+			
+		else begin // Otherwise, keep it turned off.
+			display = 7'b1111111;
+		end
+	end
+	
+endmodule
+
+
+module displaySegmentTens(Q, display, turn); // Segment converter for tens only.
+	input turn; // The value to indicate whether it is the direction's turn.
+	input [3:0] Q; // The binary to be used to generate the segment values.
+	output reg [6:0] display; // The segment.
+	
+	always @(Q) begin
+		if (turn == 1) // When it is the direction's turn, set an actual segment value to it.
+			case(Q)
+		
+			0: display = 7'b1111111;
+			1: display = 7'b1111001;
+			2: display = 7'b0100100;
+			3: display = 7'b0110000;
+			4: display = 7'b0011001;
+			5: display = 7'b0010010;
+			6: display = 7'b0000010;
+			7: display = 7'b1111000;
+			8: display = 7'b0000000;
+			9: display = 7'b0011000;
+
+			endcase
+			
+		else begin // Otherwise, keep it turned off.
+			display = 7'b1111111;
+		end
+	end
+	
+endmodule
