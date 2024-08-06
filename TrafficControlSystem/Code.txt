@@ -1,4 +1,4 @@
-module RoughProject(inputClock, horizSegmentOnes, horizSegmentTens, vertSegmentOnes, vertSegmentTens, 
+module Project(inputClock, horizSegmentOnes, horizSegmentTens, vertSegmentOnes, vertSegmentTens, 
 						  horizontalLED, verticalLED, horizPedesButton, vertPedesButton, horizCarIncrButton, vertCarIncrButton);
 	input inputClock, horizPedesButton, vertPedesButton, horizCarIncrButton, vertCarIncrButton; // The 50 MHz clock input, the pedestrian traffic light buttons and the number of cars.
 	output [6:0] horizSegmentOnes, horizSegmentTens, vertSegmentOnes, vertSegmentTens; // The 7-segment time displays for the pedestrians to cross the street.
